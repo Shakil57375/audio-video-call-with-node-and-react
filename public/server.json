@@ -1,0 +1,61 @@
+const { Server } = require("socket.io");
+
+const io = new Server(5000, {
+  cors: {
+    origin: "*",
+  },
+});
+
+// Maps to track email and socket IDs
+const emailToSocketIdMap = new Map();
+const socketIdToEmailMap = new Map();
+
+io.on("connection", (socket) => {
+  console.log(`Socket Connected: ${socket.id}`);
+
+  // Handle 'room:join' event
+  socket.on("room:join", (data) => {
+    console.log("Data sent from frontend:", data);
+    const { email, room } = data;
+
+    // Store email and socket ID
+    emailToSocketIdMap.set(email, socket.id);
+    socketIdToEmailMap.set(socket.id, email);
+
+    // Notify others in the room that a new user has joined
+    socket.to(room).emit("user:joined", { email, id: socket.id });
+    socket.join(room);
+
+    // Send confirmation back to the joining user
+    socket.emit("room:join", data);
+  });
+
+  // Handle WebRTC Offer
+  socket.on("call:offer", ({ to, offer }) => {
+    console.log(`Offer sent to: ${to}`);
+    io.to(to).emit("call:offer", { from: socket.id, offer });
+  });
+
+  // Handle WebRTC Answer
+  socket.on("call:answer", ({ to, answer }) => {
+    console.log(`Answer sent to: ${to}`);
+    io.to(to).emit("call:answer", { from: socket.id, answer });
+  });
+
+  // Handle ICE Candidate
+  socket.on("call:ice-candidate", ({ to, candidate }) => {
+    console.log(`ICE candidate sent to: ${to}`);
+    io.to(to).emit("call:ice-candidate", { from: socket.id, candidate });
+  });
+
+  // Handle Disconnection
+  socket.on("disconnect", () => {
+    console.log(`Socket Disconnected: ${socket.id}`);
+    const email = socketIdToEmailMap.get(socket.id);
+
+    if (email) {
+      emailToSocketIdMap.delete(email);
+      socketIdToEmailMap.delete(socket.id);
+    }
+  });
+});

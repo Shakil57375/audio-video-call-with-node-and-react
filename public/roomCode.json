@@ -1,0 +1,128 @@
+import React, { useCallback, useEffect, useState, useRef } from "react";
+import Container from "../Container/Container";
+import { useSocket } from "../../Context/SocketProvider";
+import { PhoneMissed, PhoneOutgoing } from "lucide-react";
+
+const Room = () => {
+  const socket = useSocket();
+  const [remoteSocketId, setRemoteSocketId] = useState(null);
+  const [myStream, setMyStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+
+  const peerConnection = useRef(null);
+
+  const handleUserJoined = useCallback((data) => {
+    const { email, id } = data;
+    console.log(`Email ${email} joined the room with ID: ${id}`);
+    setRemoteSocketId(id);
+  }, []);
+
+  const handleCallUser = useCallback(async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: false, // Change to true if you want video calls
+    });
+    setMyStream(stream);
+
+    peerConnection.current = new RTCPeerConnection();
+
+    // Add local stream tracks to the peer connection
+    stream.getTracks().forEach((track) => {
+      peerConnection.current.addTrack(track, stream);
+    });
+
+    // Create an offer
+    const offer = await peerConnection.current.createOffer();
+    await peerConnection.current.setLocalDescription(offer);
+
+    // Send the offer to the remote user via signaling
+    socket.emit("call:offer", { to: remoteSocketId, offer });
+  }, [remoteSocketId, socket]);
+
+  useEffect(() => {
+    // Listen for incoming offers
+    socket.on("call:offer", async ({ from, offer }) => {
+      peerConnection.current = new RTCPeerConnection();
+
+      // Handle remote stream
+      peerConnection.current.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+      };
+
+      // Add local stream tracks
+      if (myStream) {
+        myStream.getTracks().forEach((track) => {
+          peerConnection.current.addTrack(track, myStream);
+        });
+      }
+
+      // Set remote description and create an answer
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+
+      // Send the answer back to the caller
+      socket.emit("call:answer", { to: from, answer });
+    });
+
+    // Listen for answers
+    socket.on("call:answer", async ({ from, answer }) => {
+      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    // Listen for ICE candidates
+    socket.on("call:ice-candidate", ({ from, candidate }) => {
+      peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    return () => {
+      socket.off("call:offer");
+      socket.off("call:answer");
+      socket.off("call:ice-candidate");
+    };
+  }, [socket, myStream]);
+
+  // Handle ICE candidates
+  useEffect(() => {
+    if (peerConnection.current) {
+      peerConnection.current.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("call:ice-candidate", { to: remoteSocketId, candidate: event.candidate });
+        }
+      };
+    }
+  }, [socket, remoteSocketId]);
+
+  return (
+    <Container>
+      <div className="flex flex-col justify-center h-screen">
+        <h1 className="text-3xl font-bold text-center">Room page</h1>
+        <h3 className="text-center mt-2">
+          {remoteSocketId ? "Connected" : "No one in room"}
+        </h3>
+        <div className="flex items-center gap-5 mx-auto mt-5">
+          {remoteSocketId && (
+            <button
+              onClick={handleCallUser}
+              className="text-center bg-green-600 hover:bg-green-700 p-2 rounded-full"
+            >
+              <PhoneOutgoing size={20} className="text-white" />
+            </button>
+          )}
+          {/* Uncomment if you want a hangup button */}
+          {/* <button className="text-center bg-red-600 hover:bg-red-700 p-2 rounded-full">
+            <PhoneMissed size={20} className="text-white" />
+          </button> */}
+        </div>
+        <div className="mt-5">
+          <h3 className="text-xl font-semibold">My Audio</h3>
+          {myStream && <audio controls autoPlay ref={(audio) => (audio.srcObject = myStream)} />}
+          <h3 className="text-xl font-semibold mt-5">Remote Audio</h3>
+          {remoteStream && <audio controls autoPlay ref={(audio) => (audio.srcObject = remoteStream)} />}
+        </div>
+      </div>
+    </Container>
+  );
+};
+
+export default Room;
