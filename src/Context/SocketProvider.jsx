@@ -12,7 +12,7 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const newSocket = io("https://y-lentxyi9r-shakil57375s-projects.vercel.app");
+    const newSocket = io("https://y-jcw36bg4b-shakil57375s-projects.vercel.app");
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
